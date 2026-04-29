@@ -1,0 +1,37 @@
+Brick 2 — Cyberdeck
+Build Journal / Decision Log
+
+Purpose:
+This file records reasoning, tradeoffs, lessons learned, and open questions
+encountered while building Brick 2.
+
+What goes here:
+- Design decisions and why they were made
+- Hardware or OS tradeoffs
+- Problems encountered and how they were resolved
+- Things to revisit in future bricks
+
+What does NOT go here:
+- Step-by-step instructions
+- Commands or scripts
+- Final documentation (that belongs in README.md and /docs)
+
+This file is informal, chronological, and human-focused.
+
+--------------------------------------------------
+
+Brick: 2
+Title: Cyberdeck Platform
+
+Key Decisions:
+- Raspberry Pi 5 chosen over Pi 4 for NVMe support
+- External Wi-Fi adapter required for monitor mode
+- Brick 1 OS cloned instead of fresh install
+
+Open Questions:
+- Internal battery vs power bank
+- OLED HUD necessity vs nice-to-have
+
+Future Integration:
+- Brick 3 wireless attacks
+- Brick 4 automation

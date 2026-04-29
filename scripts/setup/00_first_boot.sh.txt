@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Brick 2 - Cyberdeck: First boot/setup helper (safe baseline)
+# - Creates standard directories
+# - Sets hostname (optional)
+# - Applies a few sane defaults
+# - Optionally enables SSH (disabled by default)
+# - Installs comfort tools (non-offensive)
+#
+# Usage:
+#   sudo ./00_first_boot.sh
+#
+# Optional env vars:
+#   CYBERDECK_HOSTNAME="cyberdeck"   (default: cyberdeck)
+#   ENABLE_SSH="false"              (default: false)
+#   INSTALL_TOOLS="true"            (default: true)
+
+CYBERDECK_HOSTNAME="${CYBERDECK_HOSTNAME:-cyberdeck}"
+ENABLE_SSH="${ENABLE_SSH:-false}"
+INSTALL_TOOLS="${INSTALL_TOOLS:-true}"
+
+STAMP_DIR="/etc/cyberdeck"
+STAMP_FILE="${STAMP_DIR}/brick2_setup_stamp.txt"
+LOG_DIR="/var/log/cyberdeck"
+LOG_FILE="${LOG_DIR}/first_boot.log"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "ERROR: Please run as root (sudo)." >&2
+  exit 1
+fi
+
+mkdir -p "${LOG_DIR}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+echo "== Brick 2 First Boot Setup =="
+echo "Timestamp: $(date -Is)"
+echo "Hostname target: ${CYBERDECK_HOSTNAME}"
+echo "Enable SSH: ${ENABLE_SSH}"
+echo "Install tools: ${INSTALL_TOOLS}"
+echo
+
+# Detect distro/package manager
+PKG_MGR=""
+if command -v apt-get >/dev/null 2>&1; then
+  PKG_MGR="apt"
+else
+  echo "ERROR: Unsupported system (apt-get not found). This script currently supports Debian/Ubuntu/Kali/Parrot." >&2
+  exit 1
+fi
+
+# Standard directories for the operator (works even if username differs)
+# Prefer the invoking user's HOME when using sudo.
+TARGET_USER="${SUDO_USER:-root}"
+TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6 || true)"
+if [[ -z "${TARGET_HOME}" ]]; then
+  TARGET_HOME="/root"
+fi
+
+echo "Target user: ${TARGET_USER}"
+echo "Target home: ${TARGET_HOME}"
+echo
+
+STANDARD_DIRS=(
+  "${TARGET_HOME}/captures"
+  "${TARGET_HOME}/logs"
+  "${TARGET_HOME}/backups"
+  "${TARGET_HOME}/projects"
+  "${TARGET_HOME}/brick-stack"
+)
+
+echo "Creating standard directories..."
+for d in "${STANDARD_DIRS[@]}"; do
+  mkdir -p "$d"
+  chown -R "${TARGET_USER}:${TARGET_USER}" "$d" || true
+done
+echo "Done."
+echo
+
+# Set hostname if desired
+CURRENT_HOSTNAME="$(hostname)"
+if [[ "${CYBERDECK_HOSTNAME}" != "${CURRENT_HOSTNAME}" ]]; then
+  echo "Setting hostname: ${CURRENT_HOSTNAME} -> ${CYBERDECK_HOSTNAME}"
+  hostnamectl set-hostname "${CYBERDECK_HOSTNAME}"
+else
+  echo "Hostname already set to ${CURRENT_HOSTNAME}"
+fi
+echo
+
+# Basic time + locale sanity (do not force locale; just ensure tzdata exists)
+echo "Ensuring time tooling present..."
+apt-get update -y
+apt-get install -y --no-install-recommends tzdata ca-certificates
+echo
+
+# Install comfort tools (non-offensive baseline)
+if [[ "${INSTALL_TOOLS}" == "true" ]]; then
+  echo "Installing baseline comfort tools..."
+  apt-get install -y --no-install-recommends \
+    git curl wget tmux htop nano vim \
+    unzip zip rsync jq lsof tree
+  echo "Done."
+else
+  echo "Skipping tool installation (INSTALL_TOOLS=false)."
+fi
+echo
+
+# SSH handling (OFF by default)
+if [[ "${ENABLE_SSH}" == "true" ]]; then
+  echo "Enabling SSH (explicitly requested)..."
+  apt-get install -y --no-install-recommends openssh-server
+  systemctl enable ssh || systemctl enable sshd || true
+  systemctl start ssh || systemctl start sshd || true
+  echo "SSH enabled and started."
+else
+  echo "SSH not enabled (default)."
+  echo "If you want SSH: run with ENABLE_SSH=true"
+fi
+echo
+
+# Create a build stamp (so you know this ran)
+mkdir -p "${STAMP_DIR}"
+cat > "${STAMP_FILE}" <<EOF
+Brick: 2
+Component: Cyberdeck
+Script: 00_first_boot.sh
+Ran as: ${TARGET_USER}
+Timestamp: $(date -Is)
+Hostname: $(hostname)
+OS: $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME}" || uname -a)
+EOF
+chmod 0644 "${STAMP_FILE}"
+
+echo "Wrote setup stamp: ${STAMP_FILE}"
+echo "Log: ${LOG_FILE}"
+echo
+echo "First-boot setup complete."

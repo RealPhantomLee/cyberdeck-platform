@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Brick 2 - Cyberdeck: Network mode toggle (safe)
+# Modes:
+#   quiet     -> Wi-Fi OFF, Bluetooth OFF, SSH OFF (optional)
+#   connected -> Wi-Fi ON, Bluetooth ON (optional), SSH ON (optional)
+#
+# Usage:
+#   sudo ./net_mode.sh quiet
+#   sudo ./net_mode.sh connected
+#
+# Optional env vars:
+#   MANAGE_SSH="true"       (default: true)
+#   MANAGE_BT="true"        (default: true)
+
+MODE="${1:-}"
+MANAGE_SSH="${MANAGE_SSH:-true}"
+MANAGE_BT="${MANAGE_BT:-true}"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "ERROR: Please run as root (sudo)." >&2
+  exit 1
+fi
+
+if [[ "${MODE}" != "quiet" && "${MODE}" != "connected" ]]; then
+  echo "Usage: sudo $0 {quiet|connected}" >&2
+  exit 1
+fi
+
+echo "== Cyberdeck Network Mode: ${MODE} =="
+
+# Wi-Fi via NetworkManager if available
+nm_ok=false
+if command -v nmcli >/dev/null 2>&1; then
+  nm_ok=true
+fi
+
+wifi_off() {
+  if $nm_ok; then
+    nmcli radio wifi off || true
+  else
+    # Fallback: try rfkill if present
+    command -v rfkill >/dev/null 2>&1 && rfkill block wifi || true
+  fi
+}
+
+wifi_on() {
+  if $nm_ok; then
+    nmcli radio wifi on || true
+  else
+    command -v rfkill >/dev/null 2>&1 && rfkill unblock wifi || true
+  fi
+}
+
+bt_off() {
+  if [[ "${MANAGE_BT}" == "true" ]]; then
+    if $nm_ok; then
+      nmcli radio bluetooth off || true
+    else
+      command -v rfkill >/dev/null 2>&1 && rfkill block bluetooth || true
+    fi
+  fi
+}
+
+bt_on() {
+  if [[ "${MANAGE_BT}" == "true" ]]; then
+    if $nm_ok; then
+      nmcli radio bluetooth on || true
+    else
+      command -v rfkill >/dev/null 2>&1 && rfkill unblock bluetooth || true
+    fi
+  fi
+}
+
+ssh_off() {
+  if [[ "${MANAGE_SSH}" == "true" ]]; then
+    systemctl stop ssh 2>/dev/null || true
+    systemctl stop sshd 2>/dev/null || true
+    systemctl disable ssh 2>/dev/null || true
+    systemctl disable sshd 2>/dev/null || true
+  fi
+}
+
+ssh_on() {
+  if [[ "${MANAGE_SSH}" == "true" ]]; then
+    # Ensure installed if missing
+    if ! command -v sshd >/dev/null 2>&1; then
+      if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y
+        apt-get install -y --no-install-recommends openssh-server
+      fi
+    fi
+    systemctl enable ssh 2>/dev/null || true
+    systemctl enable sshd 2>/dev/null || true
+    systemctl start ssh 2>/dev/null || true
+    systemctl start sshd 2>/dev/null || true
+  fi
+}
+
+if [[ "${MODE}" == "quiet" ]]; then
+  wifi_off
+  bt_off
+  ssh_off
+  echo "Quiet mode applied."
+else
+  wifi_on
+  bt_on
+  ssh_on
+  echo "Connected mode applied."
+fi
+
+echo
+echo "Current radios (if available):"
+if $nm_ok; then
+  nmcli radio all || true
+else
+  echo "nmcli not available. (Consider installing NetworkManager.)"
+fi

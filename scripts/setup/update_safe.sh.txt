@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Brick 2 - Cyberdeck: Conservative update wrapper (safe)
+# - Makes a small backup of key config files before updating
+# - Logs package changes
+# Usage:
+#   sudo ./update_safe.sh
+
+BACKUP_ROOT="/var/backups/cyberdeck"
+LOG_DIR="/var/log/cyberdeck"
+LOG_FILE="${LOG_DIR}/update_safe.log"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "ERROR: Please run as root (sudo)." >&2
+  exit 1
+fi
+
+mkdir -p "${BACKUP_ROOT}" "${LOG_DIR}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+TS="$(date -Is | tr ':' '-')"
+BACKUP_DIR="${BACKUP_ROOT}/${TS}"
+mkdir -p "${BACKUP_DIR}"
+
+echo "== Cyberdeck Safe Update =="
+echo "Timestamp: $(date -Is)"
+echo "Backup dir: ${BACKUP_DIR}"
+echo "Log: ${LOG_FILE}"
+echo
+
+# Snapshot key configs (best-effort)
+echo "Backing up key configuration files (best-effort)..."
+FILES=(
+  "/etc/hostname"
+  "/etc/hosts"
+  "/etc/fstab"
+  "/etc/ssh/sshd_config"
+  "/etc/NetworkManager/NetworkManager.conf"
+)
+for f in "${FILES[@]}"; do
+  if [[ -f "${f}" ]]; then
+    mkdir -p "${BACKUP_DIR}$(dirname "${f}")"
+    cp -a "${f}" "${BACKUP_DIR}${f}"
+  fi
+done
+
+# Package list snapshots
+if command -v dpkg >/dev/null 2>&1; then
+  dpkg -l > "${BACKUP_DIR}/dpkg_list_before.txt" || true
+fi
+
+echo "Running apt update..."
+apt-get update -y
+
+echo "Upgrading packages (conservative)..."
+# "upgrade" (not dist-upgrade) for stability
+apt-get upgrade -y
+
+echo "Removing unused packages (safe cleanup)..."
+apt-get autoremove -y
+
+if command -v dpkg >/dev/null 2>&1; then
+  dpkg -l > "${BACKUP_DIR}/dpkg_list_after.txt" || true
+fi
+
+echo
+echo "Update complete."
+echo "If kernel/system packages changed, reboot is recommended."

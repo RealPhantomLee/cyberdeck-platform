@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Brick 2 - Cyberdeck: Config + docs backup (safe)
+# - Backs up key system configs and your Brick folders/docs
+# - Creates a dated folder in ~/backups or /var/backups
+#
+# Usage:
+#   ./backup_configs.sh             (user-mode backup to ~/backups)
+#   sudo ./backup_configs.sh        (also captures /etc configs more fully)
+
+TARGET_USER="${SUDO_USER:-$(whoami)}"
+TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6 || true)"
+if [[ -z "${TARGET_HOME}" ]]; then TARGET_HOME="$HOME"; fi
+
+TS="$(date +%Y-%m-%d_%H-%M-%S)"
+DEST="${TARGET_HOME}/backups/${TS}"
+mkdir -p "${DEST}"
+
+echo "== Cyberdeck Backup =="
+echo "User: ${TARGET_USER}"
+echo "Destination: ${DEST}"
+echo
+
+# 1) Backup Brick docs if present (assumes repo structure)
+# This is best-effort; it won't fail if folders don't exist.
+echo "Backing up Brick documentation (best-effort)..."
+for p in \
+  "${TARGET_HOME}/brick-stack" \
+  "${TARGET_HOME}/projects" \
+  "${PWD}/../.." \
+; do
+  if [[ -d "${p}" ]]; then
+    name="$(basename "${p}")"
+    rsync -a --exclude ".git" --exclude "node_modules" --exclude "__pycache__" \
+      "${p}/" "${DEST}/docs_${name}/" || true
+  fi
+done
+echo
+
+# 2) Backup user SSH keys (if any)
+echo "Backing up user SSH directory (best-effort)..."
+if [[ -d "${TARGET_HOME}/.ssh" ]]; then
+  rsync -a "${TARGET_HOME}/.ssh/" "${DEST}/user_ssh/" || true
+fi
+echo
+
+# 3) Backup key system configs (if sudo)
+if [[ "${EUID}" -eq 0 ]]; then
+  echo "Backing up key system configs (sudo mode)..."
+  SYS_DEST="${DEST}/system"
+  mkdir -p "${SYS_DEST}"
+
+  # Core configs
+  rsync -a /etc/hostname "${SYS_DEST}/" 2>/dev/null || true
+  rsync -a /etc/hosts "${SYS_DEST}/" 2>/dev/null || true
+  rsync -a /etc/fstab "${SYS_DEST}/" 2>/dev/null || true
+
+  # SSH + NetworkManager if present
+  [[ -d /etc/ssh ]] && rsync -a /etc/ssh/ "${SYS_DEST}/etc_ssh/" || true
+  [[ -d /etc/NetworkManager ]] && rsync -a /etc/NetworkManager/ "${SYS_DEST}/etc_NetworkManager/" || true
+
+  # Package lists
+  command -v dpkg >/dev/null 2>&1 && dpkg -l > "${SYS_DEST}/dpkg_list.txt" || true
+else
+  echo "System config backup skipped (run with sudo to include /etc and package lists)."
+fi
+
+echo
+echo "Backup complete: ${DEST}"
